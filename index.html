@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>單字保衛戰 - 英文學習遊戲</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .game-container { cursor: crosshair; }
+        .word-item { transition: transform 0.1s linear; }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+        }
+        .shake-animation { animation: shake 0.2s ease-in-out; }
+        .heart-lost { filter: grayscale(100%) opacity(0.5); }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen flex flex-col overflow-hidden font-sans">
+
+    <div class="p-4 flex justify-between items-center bg-gray-800 border-b border-gray-700">
+        <div class="text-lg font-bold">Score: <span id="score">0</span></div>
+        <div class="text-lg font-bold">Time: <span id="timer">30</span>s</div>
+        <div id="lives" class="flex gap-2">
+            <span class="text-2xl text-red-500">♥</span>
+            <span class="text-2xl text-red-500">♥</span>
+            <span class="text-2xl text-red-500">♥</span>
+        </div>
+    </div>
+
+    <div id="gameArea" class="flex-grow relative overflow-hidden game-container">
+        <!-- Game Over Screen -->
+        <div id="gameOver" class="hidden absolute inset-0 flex flex-col items-center justify-center bg-black/90 z-50 p-6">
+            <h2 class="text-4xl font-bold mb-4">遊戲結束</h2>
+            <p class="text-xl mb-4">最終得分: <span id="finalScore">0</span></p>
+            <input type="text" id="playerName" placeholder="請輸入名字" maxlength="10" class="p-2 text-black rounded mb-4 w-48 text-center">
+            <button onclick="saveScore()" class="px-6 py-2 bg-blue-600 rounded-full hover:bg-blue-500 transition mb-6">儲存紀錄</button>
+            <div id="leaderboard" class="w-full max-w-sm text-center">
+                <h3 class="font-bold border-b border-gray-600 pb-2 mb-2">排行榜</h3>
+                <ul id="scoreList" class="text-sm"></ul>
+            </div>
+            <button onclick="location.reload()" class="mt-6 text-gray-400 hover:text-white underline">重新開始</button>
+        </div>
+    </div>
+
+    <div class="p-4 bg-gray-800 border-t border-gray-700 select-none">
+        <div id="keyboard" class="grid grid-cols-7 sm:grid-cols-9 md:grid-cols-13 gap-1 md:gap-2 max-w-4xl mx-auto"></div>
+    </div>
+
+    <script>
+        // 請將此處替換為你部署後的 GAS 網頁應用程式 URL
+        const GAS_URL = "https://script.google.com/macros/s/AKfycbxCnmBWvAEbS2ASjNq5DN0ZE4EScWQTryvNMYLXsXrl5DOuejAoQBpYWUMT2gDkLg0FbQ/exec"; 
+        
+        const dictionary = ["APPLE", "BANANA", "TIGER", "SCHOOL", "FRIEND", "HOUSE", "TABLE", "DANCE", "WATER", "CLOCK"];
+        let score = 0;
+        let lives = 3;
+        let timeLeft = 30;
+        let activeWords = [];
+        let gameActive = true;
+        let lastSpawn = 0;
+        
+        const gameArea = document.getElementById('gameArea');
+        const keyboard = document.getElementById('keyboard');
+        const scoreEl = document.getElementById('score');
+        const timerEl = document.getElementById('timer');
+
+        const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+        alphabet.forEach(char => {
+            const btn = document.createElement('button');
+            btn.textContent = char;
+            btn.className = "h-10 md:h-12 bg-gray-700 rounded hover:bg-gray-600 active:bg-blue-600 transition-colors duration-100 font-bold";
+            btn.onclick = () => handleInput(char);
+            keyboard.appendChild(btn);
+        });
+
+        const countdown = setInterval(() => {
+            if (!gameActive) return;
+            timeLeft--;
+            timerEl.textContent = timeLeft;
+            if (timeLeft <= 0) endGame();
+        }, 1000);
+
+        function spawnWord() {
+            if (!gameActive) return;
+            const word = dictionary[Math.floor(Math.random() * dictionary.length)];
+            const hiddenIdx = Math.floor(Math.random() * word.length);
+            
+            const wordObj = {
+                id: Date.now(),
+                fullWord: word,
+                hiddenChar: word[hiddenIdx],
+                display: word.split('').map((c, i) => i === hiddenIdx ? '_' : c).join(' '),
+                x: Math.random() * (gameArea.offsetWidth - 150) + 20,
+                y: -50,
+                speed: 0.6 + (score / 800),
+                element: document.createElement('div')
+            };
+
+            wordObj.element.className = "absolute text-xl md:text-2xl font-bold text-yellow-400 word-item";
+            wordObj.element.textContent = wordObj.display;
+            gameArea.appendChild(wordObj.element);
+            activeWords.push(wordObj);
+        }
+
+        function gameLoop(timestamp) {
+            if (!gameActive) return;
+
+            if (timestamp - lastSpawn > 2500) {
+                spawnWord();
+                lastSpawn = timestamp;
+            }
+
+            activeWords.forEach((word, index) => {
+                word.y += word.speed;
+                word.element.style.transform = `translate(${word.x}px, ${word.y}px)`;
+
+                if (word.y > gameArea.offsetHeight) {
+                    loseLife();
+                    gameArea.removeChild(word.element);
+                    activeWords.splice(index, 1);
+                }
+            });
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function loseLife() {
+            lives--;
+            const heartElements = document.querySelectorAll('#lives span');
+            if (lives >= 0) heartElements[lives].classList.add('heart-lost');
+            if (lives <= 0) endGame();
+        }
+
+        function endGame() {
+            gameActive = false;
+            clearInterval(countdown);
+            document.getElementById('finalScore').textContent = score;
+            document.getElementById('gameOver').classList.remove('hidden');
+            fetchLeaderboard();
+        }
+
+        async function saveScore() {
+            const name = document.getElementById('playerName').value || "匿名";
+            const btn = document.querySelector('#gameOver button');
+            btn.textContent = "儲存中...";
+            
+            try {
+                const response = await fetch(GAS_URL, {
+                    method: 'POST',
+                    mode: 'no-cors', // GAS 跨域限制
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, score })
+                });
+                fetchLeaderboard();
+                btn.textContent = "已儲存";
+                btn.disabled = true;
+            } catch (err) {
+                console.error("Save failed", err);
+                alert("儲存失敗，請確認網路連線或 GAS 設定");
+            }
+        }
+
+        async function fetchLeaderboard() {
+            const list = document.getElementById('scoreList');
+            list.innerHTML = "<li>讀取排行榜中...</li>";
+            try {
+                const response = await fetch(GAS_URL);
+                const scores = await response.json();
+                list.innerHTML = scores.map(s => `<li>${s.name}: ${s.score}</li>`).join('');
+            } catch (err) {
+                list.innerHTML = "<li>無法載入排行</li>";
+            }
+        }
+
+        function handleInput(char) {
+            if (!gameActive || activeWords.length === 0) return;
+            const targetWord = activeWords[0];
+            if (char === targetWord.hiddenChar) {
+                const msg = new SpeechSynthesisUtterance(targetWord.fullWord);
+                msg.lang = 'en-US';
+                window.speechSynthesis.speak(msg);
+
+                score += 10;
+                scoreEl.textContent = score;
+                targetWord.element.textContent = targetWord.fullWord;
+                targetWord.element.classList.add('text-green-500');
+                setTimeout(() => { if (gameArea.contains(targetWord.element)) gameArea.removeChild(targetWord.element); }, 300);
+                activeWords.shift();
+            } else {
+                const btn = Array.from(keyboard.children).find(b => b.textContent === char);
+                btn.classList.add('bg-red-600', 'shake-animation');
+                setTimeout(() => { btn.classList.remove('bg-red-600', 'shake-animation'); }, 300);
+            }
+        }
+
+        window.addEventListener('keydown', (e) => {
+            const char = e.key.toUpperCase();
+            if (alphabet.includes(char)) handleInput(char);
+        });
+
+        window.onload = () => requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>
